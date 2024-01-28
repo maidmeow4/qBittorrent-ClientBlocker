@@ -18,7 +18,7 @@ func Log(module string, str string, logToFile bool, args ...interface {}) {
 			logToFile = true
 		}
 	}
-	logStr := fmt.Sprintf("[" + GetDateTime(true) + "][" + module + "] " + str + ".\n", args...)
+	logStr := fmt.Sprintf("[" + GetDateTime(true, 0) + "][" + module + "] " + str + ".\n", args...)
 	if config.LogToFile && logToFile && logFile != nil {
 		if _, err := logFile.Write([]byte(logStr)); err != nil {
 			Log("Log", "写入日志时发生了错误: %s", false, err.Error())
@@ -35,7 +35,7 @@ func LoadLog() bool {
 		return false
 	}
 
-	tmpTodayStr := GetDateTime(false)
+	tmpTodayStr := GetDateTime(false, 0)
 	newDay := (todayStr != tmpTodayStr)
 	newLogPath := (lastLogPath != config.LogPath)
 
@@ -63,4 +63,7 @@ func LoadLog() bool {
 	logFile = tLogFile
 
 	return true
+}
+func GetStatFilePath() string {
+	return (lastLogPath + "/" + todayStr + "-Stat.txt")
 }

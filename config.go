@@ -19,6 +19,7 @@ type ConfigStruct struct {
 	Interval                      uint32
 	CleanInterval                 uint32
 	PeerMapCleanInterval          uint32
+	PeerStatMapCleanInterval      uint32
 	BanTime                       uint32
 	SleepTime                     uint32
 	Timeout                       uint32
@@ -68,6 +69,7 @@ var config = ConfigStruct {
 	Interval:                      2,
 	CleanInterval:                 3600,
 	PeerMapCleanInterval:          60,
+	PeerStatMapCleanInterval:      0,
 	BanTime:                       86400,
 	SleepTime:                     20,
 	Timeout:                       6,

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
+	"fmt"
 	"time"
+	"bufio"
 	"strings"
 )
 
@@ -14,6 +17,9 @@ type PeerInfoStruct struct {
 	Progress  float64
 	Uploaded  int64
 }
+type PeerStatInfoStruct struct {
+	Clients map[string]bool
+}
 type BlockPeerInfoStruct struct {
 	Timestamp int64
 	Port      int
@@ -24,8 +30,10 @@ var lastQBURL = ""
 var lastCleanTimestamp int64 = 0
 var lastIPCleanTimestamp int64 = 0
 var lastPeerCleanTimestamp int64 = 0
+var lastPeerStatMapCleanTimestamp int64 = 0
 var ipMap = make(map[string]IPInfoStruct)
 var peerMap = make(map[string]PeerInfoStruct)
+var peerMapStat = make(map[string]PeerStatInfoStruct)
 var blockPeerMap = make(map[string]BlockPeerInfoStruct)
 
 func AddIPInfo(clientIP string, torrentInfoHash string, clientUploaded int64) {
@@ -41,7 +49,7 @@ func AddIPInfo(clientIP string, torrentInfoHash string, clientUploaded int64) {
 	clientTorrentUploadedMap[torrentInfoHash] = clientUploaded
 	ipMap[clientIP] = IPInfoStruct { TorrentUploaded: clientTorrentUploadedMap }
 }
-func AddPeerInfo(peerIP string, peerPort int, peerProgress float64, peerUploaded int64) {
+func AddPeerInfo(peerIP string, peerPort int, peerClient string, peerProgress float64, peerUploaded int64) {
 	if config.MaxIPPortCount <= 0 && !config.BanByRelativeProgressUploaded {
 		return
 	}
@@ -52,8 +60,16 @@ func AddPeerInfo(peerIP string, peerPort int, peerProgress float64, peerUploaded
 	} else {
 		peerPortMap = peer.Port
 	}
+	var peerStatClients map[string]bool
+	if peer, exist := peerMapStat[peerIP]; !exist {
+		peerStatClients = make(map[string]bool)
+	} else {
+		peerStatClients = peer.Clients
+	}
+	peerStatClients[peerClient] = true
 	peerPortMap[peerPort] = true
 	peerMap[peerIP] = PeerInfoStruct { Timestamp: currentTimestamp, Port: peerPortMap, Progress: peerProgress, Uploaded: peerUploaded }
+	peerMapStat[peerIP] = PeerStatInfoStruct { Clients: peerStatClients }
 }
 func AddBlockPeer(peerIP string, peerPort int) {
 	blockPeerMap[strings.ToLower(peerIP)] = BlockPeerInfoStruct { Timestamp: currentTimestamp, Port: peerPort }
@@ -72,10 +88,9 @@ func IsBlockedPeer(peerIP string, peerPort int, updateTimestamp bool) bool {
 func IsIPTooHighUploaded(ipInfo IPInfoStruct, lastIPInfo IPInfoStruct) float64 {
 	var totalUploaded int64 = 0
 	for torrentInfoHash, torrentUploaded := range ipInfo.TorrentUploaded {
-		if lastTorrentUploaded, exist := lastIPInfo.TorrentUploaded[torrentInfoHash]; !exist {
-			totalUploaded += torrentUploaded
-		} else {
-			totalUploaded += (torrentUploaded - lastTorrentUploaded)
+		totalUploaded += torrentUploaded
+		if lastTorrentUploaded, exist := lastIPInfo.TorrentUploaded[torrentInfoHash]; exist {
+			totalUploaded -= lastTorrentUploaded
 		}
 	}
 	var totalUploadedMB float64 = (float64(totalUploaded) / 1024 / 1024)
@@ -185,7 +200,7 @@ func CheckPeer(peer PeerStruct, torrentInfoHash string, torrentTotalSize int64) 
 		}
 	}
 	AddIPInfo(peer.IP, torrentInfoHash, peer.Uploaded)
-	AddPeerInfo(peer.IP, peer.Port, peer.Progress, peer.Uploaded)
+	AddPeerInfo(peer.IP, peer.Port, peer.Client, peer.Progress, peer.Uploaded)
 	return 0
 }
 func CheckAllIP(lastIPMap map[string]IPInfoStruct) int {
@@ -245,6 +260,30 @@ func CheckAllPeer(lastPeerMap map[string]PeerInfoStruct) int {
 	}
 	return 0
 }
+func GenClientStat() bool {
+	if config.PeerStatMapCleanInterval > 0 && currentTimestamp > (lastPeerStatMapCleanTimestamp + int64(config.PeerStatMapCleanInterval)) {
+		clientCountMap := map[string]int {}
+		for _, peerStatInfo := range peerMapStat {
+			for client, _ := range peerStatInfo.Clients {
+				if clientCount, exist := clientCountMap[client]; exist {
+					clientCountMap[client] = clientCount
+				}
+				clientCountMap[client] += 1
+			}
+		}
+		if statFile, err := os.Create(GetStatFilePath()); err == nil {
+			statFileWrite := bufio.NewWriter(statFile)
+			statFileWrite.WriteString(fmt.Sprintf("客户端统计信息 (自 %s 至 %s)\n", GetDateTime(true, lastPeerStatMapCleanTimestamp), GetDateTime(true, 0)))
+			for client, count := range clientCountMap {
+				statFileWrite.WriteString(fmt.Sprintf("%s 的用户数: %d\n", client, count))
+			}
+			lastPeerStatMapCleanTimestamp = currentTimestamp
+			peerMapStat = make(map[string]PeerStatInfoStruct)
+			return true;
+		}
+	}
+	return false;
+}
 func Task() {
 	if config.QBURL == "" {
 		Log("Task", "检测到 QBURL 为空, 可能是未配置且未能自动读取 qBittorrent 配置文件", false)
@@ -300,6 +339,7 @@ func Task() {
 	currentIPBlockCount := CheckAllIP(lastIPMap)
 	ipBlockCount += currentIPBlockCount
 	blockCount += CheckAllPeer(lastPeerMap)
+	GenClientStat()
 
 	Log("Debug-Task_IgnoreEmptyHashCount", "%d", false, emptyHashCount)
 	Log("Debug-Task_IgnoreNoLeechersCount", "%d", false, noLeechersCount)
